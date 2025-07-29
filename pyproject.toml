@@ -1,0 +1,16 @@
+[project]
+name = "uv-sourcing-assistant-gradio"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gradio>=5.38.2",
+    "logfire>=4.0.0",
+    "pandas>=2.3.1",
+    "pandas-stubs>=2.3.0.250703",
+    "pydantic>=2.11.7",
+    "pydantic-ai>=0.4.7",
+    "python-dotenv>=1.1.1",
+    "requests>=2.32.4",
+]
