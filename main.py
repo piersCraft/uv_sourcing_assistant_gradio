@@ -1,23 +1,26 @@
 from dotenv import load_dotenv
 import os
 import gradio as gr
-from gradio import ChatMessage
 from pydantic_ai import Agent 
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart, ModelMessage
 from pydantic_ai.mcp import MCPServerStdio
+import logfire
+
+from tools.craftapi import CraftCompanyDetails, fetchSubjectCompany
+
+
+################################# - Environment - #################################
+logfire.configure()
+logfire.instrument_pydantic_ai()
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY in .env")
 
-################################# - Agent - #################################
-agent_plain = Agent(
-    "openai:gpt-4.1",
-    system_prompt=(
-        "You are a helpful assistant. Be concise and reply with one sentence"
-    )
-)
+
+################################# - MCP Servers  - #################################
+
 exa_server = MCPServerStdio(  
     "npx",
     args=[
@@ -28,7 +31,25 @@ exa_server = MCPServerStdio(
         "EXA_API_KEY": "2b824dd4-2573-4f98-a5c5-be06c9dd48f1"
     }
 )
-agent_tooled = Agent(
+
+################################# - Main Agent - ################################# 
+
+main_agent = Agent(
+    "openai:gpt-4.1",
+    system_prompt=(
+        "use the get_craft_data tool to return the company profile from craft"
+    )
+)
+
+@main_agent.tool_plain
+def get_craft_data() -> CraftCompanyDetails:
+    """Query craft by company domain"""
+    craft_company = fetchSubjectCompany("brightview.com")
+    return craft_company
+
+################################# - Delegate Agents - ################################# 
+
+search_agent = Agent(
     "openai:gpt-4.1",
     instructions=(
         "You are a strategic sourcing manager in a procurement department."
@@ -56,14 +77,14 @@ def parse_history(history: list[dict[str,str]]) -> list[ModelMessage]:
     return message_history
 
 # Sync Agent call function
-def call_plain_agent(message: str, history: list[ChatMessage]) -> str:
-    response = agent_plain.run_sync(message, message_history=parse_history(history))
+def call_plain_agent(message: str, history: list[dict[str,str]]) -> str:
+    response = main_agent.run_sync(message, message_history=parse_history(history))
     # message_history = response.new_messages()
     return response.output
 
 # Call agent with tools
-async def call_tooled_agent(message,history):
-    response = await agent_tooled.run(message,message_history=parse_history(history))
+async def call_tooled_agent(message: str,history: list[dict[str,str]]) -> str:
+    response = await search_agent.run(message,message_history=parse_history(history))
     # message_history = response.new_messages()
     return response.output
 
@@ -71,7 +92,7 @@ async def call_tooled_agent(message,history):
 
 with gr.Blocks(
     fill_height=True,
-    theme=gr.themes.Default(primary_hue="blue", secondary_hue="purple",font=[gr.themes.GoogleFont("proxima-nova"), "Arial", "sans-serif"]),
+    theme=gr.themes.Soft(primary_hue="blue", secondary_hue="purple",font=[gr.themes.GoogleFont("Montserrat"), "sans-serif"]),
     css="""
         footer {
             display: none !important;
@@ -122,4 +143,4 @@ with gr.Blocks(
         )
 
 if __name__ == "__main__":
-    demo.launch()
+    _ = demo.launch()
