@@ -1,14 +1,13 @@
 from dotenv import load_dotenv
 import os
-import requests
-from requests import Response
 from pydantic import BaseModel 
+import asyncio
+import aiohttp
+import pandas as pd
+
+_ = load_dotenv()
 
 ################################# - Models - #################################
-
-class GraphQlQuery(BaseModel):
-    query: str
-    variables: str | None
 
 class GraphQlFragment(BaseModel):
     name: str
@@ -18,11 +17,11 @@ class GraphQlFragment(BaseModel):
 class GraphQlVariables(BaseModel):
     domain: str
 
-class CraftPayload(BaseModel):
+class Payload(BaseModel):
     query: str
     variables: GraphQlVariables
 
-class CraftCompanyDetails(BaseModel):
+class Company(BaseModel):
     id: int
     slug: str
     displayName: str
@@ -31,44 +30,48 @@ class CraftCompanyDetails(BaseModel):
     logo: dict[str,str]
     companyType: str
 
-class CraftCompany(BaseModel):
-    company: dict[str,CraftCompanyDetails]
+class ApiResponse(BaseModel):
+    data: dict[str, Company]
 
-class CraftResponse(BaseModel):
-    data: dict[str, CraftCompany]
+class Companies(BaseModel):
+    companies: list[Company]
 
-################################# - Function - #################################
 
-_ = load_dotenv()
-craft_key: str = os.getenv("KEY_CRAFT_SOLENG")
-craft_url: str = os.getenv("URL_CRAFT_QUERY")
+async def fetch_company(session, domain: str) -> Company:
+    """
+    Make a request to the Craft API
+    """
+    url = os.getenv("URL_CRAFT_QUERY")
+    headers = {"X-Craft-Api-Key": f"{os.getenv('KEY_CRAFT_SOLENG')}", "Content-Type": "application/json"}
 
-# Instantiate company query fragment
-fragment_company = GraphQlFragment(
-    name="company",
-    on_type="Company",
-    fields=""" id slug displayName shortDescription craftUrl logo { url } companyType """)
+    firmographics = GraphQlFragment(
+        name="company",
+        on_type="Company",
+        fields=""" id slug displayName shortDescription craftUrl logo { url } companyType """)
+    query = f"""query company($domain: String!) {{ company(domain: $domain) {{ ...{firmographics.name} }} }} fragment {firmographics.name} on {firmographics.on_type} {{ {firmographics.fields} }}"""
+    variables = GraphQlVariables(domain=domain)
+    payload = Payload(query=query,variables=variables).model_dump()
 
-# Build graphQL query string
-def constructQuery(fragment: GraphQlFragment) -> str:
-    query_string: str = f"""query company($domain: String!) {{ company(domain: $domain) {{ ...{fragment.name} }} }} fragment {fragment.name} on {fragment.on_type} {{ {fragment.fields} }}"""
-    return query_string
+    async with session.post(url, json=payload, headers=headers) as response:
+        result = await response.json()
 
-# Fetch company data
-def fetchSubjectCompany(domain: str) -> CraftCompanyDetails:
-    query = constructQuery(fragment_company)
-    variables = GraphQlVariables(id=id)
-    response: Response = requests.post(url=craft_url,headers={"X-Craft-Api-Key": craft_key},json=CraftPayload(query=query, variables=variables).model_dump())
-    subjectCompany = CraftCompanyDetails.model_validate(response.json()['data']['company'])
-    return subjectCompany
+        return Company.model_validate(result["data"]["company"]) 
+
+async def fetch_companies() -> Companies:
+    domains = ["apple.com","vodafone.com","google.com"]
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_company(session, domain) for domain in domains]
+        results = await asyncio.gather(*tasks)
+
+        return Companies(companies=results)
 
 ################################# - MAIN - #################################D
-
-def main():
-    domain: str = "apple.com"
-    subject_company = fetchSubjectCompany(domain)
-    print(subject_company.model_dump())
-
+async def main():
+    results = await fetch_companies()
+    return results
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+    df = pd.json_normalize(results.model_dump()["companies"])
+    print(df)

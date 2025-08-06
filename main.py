@@ -5,19 +5,17 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart, ModelMessage
 from pydantic_ai.mcp import MCPServerStdio
 import logfire
+from tools.craftapi import Companies, fetch_companies
 
-from tools.craftapi import CraftCompanyDetails, fetchSubjectCompany
-
-
-################################# - Environment - #################################
 logfire.configure()
 logfire.instrument_pydantic_ai()
+
+################################# - Environment - #################################
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY in .env")
-
 
 ################################# - MCP Servers  - #################################
 
@@ -41,12 +39,6 @@ main_agent = Agent(
     )
 )
 
-@main_agent.tool_plain
-def get_craft_data() -> CraftCompanyDetails:
-    """Query craft by company domain"""
-    craft_company = fetchSubjectCompany("brightview.com")
-    return craft_company
-
 ################################# - Delegate Agents - ################################# 
 
 search_agent = Agent(
@@ -60,9 +52,16 @@ search_agent = Agent(
         "Only provide a maximum of 5 companies, unless the user specifies a number greater than that to return."
         "If the user provides a company name or website in the prompt, use the find similar tool within exa search to identify companies to return."
         "After the results are provided, ask the user if they would like to request more detail about these companies in Craft."
+        "If they say yes, run the get_craft_data function tool with no arguments. Just run the function"
     ),
     toolsets=[exa_server]
 )
+
+@search_agent.tool_plain
+async def get_craft_data() -> Companies:
+    """Query craft by company domain"""
+    companies = await fetch_companies()
+    return companies
 
 ################################# - Agent Calls - #################################
 
@@ -117,7 +116,6 @@ with gr.Blocks(
         }
     """
 ) as demo:
-
     with gr.Row():
         with gr.Column(scale=1,min_width=70):
             logo = gr.Image('favicon.png', show_label=False,container=False,show_download_button=False,show_fullscreen_button=False)
@@ -128,6 +126,7 @@ with gr.Blocks(
             call_tooled_agent,
             type="messages",
             fill_height=True,
+            save_history=True,
             chatbot=gr.Chatbot(
                 type="messages",
                 show_label=False,
@@ -135,12 +134,8 @@ with gr.Blocks(
                 avatar_images=("user.svg","aiChat.svg"),
                 layout="panel",
                 min_height=800
-            ),
-            textbox=gr.Textbox(
-                placeholder="Type your sourcing query here",
-                submit_btn=True
             )
         )
 
 if __name__ == "__main__":
-    _ = demo.launch()
+    demo.launch()
